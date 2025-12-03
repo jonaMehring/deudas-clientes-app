@@ -17,6 +17,7 @@ app.get("/", (req, res) => {
 
 app.use("/api/clientes-cc", clientesCcRouter);
 
+
 app.use((err, req, res, next) => {
   console.error("Error no manejado:", err);
   res.status(500).json({ error: "Error interno del servidor" });

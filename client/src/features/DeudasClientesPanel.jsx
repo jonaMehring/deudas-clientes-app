@@ -1,6 +1,5 @@
-// client/src/features/DeudasClientesPanel.jsx
-import { useEffect, useMemo, useState } from "react";
-import api from "../api";
+import { useEffect, useMemo, useState } from "react"; 
+import api from "../api"; 
 
 const fmt = (n) =>
   Number(n || 0).toLocaleString("es-AR", {
@@ -8,7 +7,41 @@ const fmt = (n) =>
     maximumFractionDigits: 2,
   });
 
-const hoyISO = () => new Date().toISOString().slice(0, 10);
+// Fecha de hoy usando zona horaria local (no UTC)
+const hoyISO = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+// Convierte cualquier fecha a yyyy-mm-dd para <input type="date">
+const toInputDate = (value) => {
+  if (!value) return hoyISO();
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return hoyISO();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+// Formatea input de monto: "1000" -> "1.000"
+const formatNumberInput = (value) => {
+  const digits = (value || "").toString().replace(/\D/g, "");
+  if (!digits) return "";
+  return Number(digits).toLocaleString("es-AR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+};
+
+// Pasa "1.000" -> 1000
+const parseMonto = (value) => {
+  const digits = (value || "").toString().replace(/\D/g, "");
+  return digits ? Number(digits) : 0;
+};
 
 export default function DeudasClientesPanel() {
   const [clients, setClients] = useState([]);
@@ -62,8 +95,8 @@ export default function DeudasClientesPanel() {
   );
 
   const totalPago = useMemo(() => {
-    const ef = Number(paymentForm.efectivo || 0);
-    const tr = Number(paymentForm.transferencia || 0);
+    const ef = parseMonto(paymentForm.efectivo);
+    const tr = parseMonto(paymentForm.transferencia);
     return ef + tr;
   }, [paymentForm.efectivo, paymentForm.transferencia]);
 
@@ -110,7 +143,13 @@ export default function DeudasClientesPanel() {
     try {
       const { data } = await api.get("/clientes-cc");
       setClients(data || []);
-      if (!selectedId && data?.length) {
+      if (!data || !data.length) {
+        setSelectedId("");
+        return;
+      }
+      // si el seleccionado ya no existe, dejamos el primero
+      const exists = data.find((c) => String(c.id) === String(selectedId));
+      if (!exists) {
         setSelectedId(String(data[0].id));
       }
     } catch (e) {
@@ -153,12 +192,26 @@ export default function DeudasClientesPanel() {
 
   function onChangeDebt(e) {
     const { name, value } = e.target;
-    setDebtForm((f) => ({ ...f, [name]: value }));
+    if (name === "amount") {
+      setDebtForm((f) => ({
+        ...f,
+        amount: formatNumberInput(value),
+      }));
+    } else {
+      setDebtForm((f) => ({ ...f, [name]: value }));
+    }
   }
 
   function onChangePayment(e) {
     const { name, value } = e.target;
-    setPaymentForm((f) => ({ ...f, [name]: value }));
+    if (name === "efectivo" || name === "transferencia") {
+      setPaymentForm((f) => ({
+        ...f,
+        [name]: formatNumberInput(value),
+      }));
+    } else {
+      setPaymentForm((f) => ({ ...f, [name]: value }));
+    }
   }
 
   async function saveClient(e) {
@@ -193,6 +246,35 @@ export default function DeudasClientesPanel() {
     }
   }
 
+  // ---------- ELIMINAR CLIENTE ----------
+  async function handleDeleteClient() {
+    if (!selectedId) return;
+    if (
+      !window.confirm(
+        "¿Eliminar este cliente y todos sus movimientos? Esta acción no se puede deshacer."
+      )
+    )
+      return;
+
+    clearMessages();
+
+    try {
+      setLoading(true);
+      await api.delete(`/clientes-cc/${selectedId}`);
+      setOkMsg("Cliente eliminado correctamente.");
+      setSelectedId("");
+      setMovimientos([]);
+      await loadClients();
+    } catch (e) {
+      setErr(
+        e?.response?.data?.error ||
+          "No se pudo eliminar el cliente. Intentá de nuevo."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // ---------- REGISTRAR / EDITAR DEUDA ----------
   async function registrarDeuda() {
     clearMessages();
@@ -201,7 +283,7 @@ export default function DeudasClientesPanel() {
       return;
     }
 
-    const monto = Number(debtForm.amount);
+    const monto = parseMonto(debtForm.amount);
     if (!(monto > 0)) {
       setErr("Ingresá un monto de deuda válido.");
       return;
@@ -250,8 +332,8 @@ export default function DeudasClientesPanel() {
       return;
     }
 
-    const ef = Number(paymentForm.efectivo || 0);
-    const tr = Number(paymentForm.transferencia || 0);
+    const ef = parseMonto(paymentForm.efectivo);
+    const tr = parseMonto(paymentForm.transferencia);
     const total = ef + tr;
 
     if (!(total > 0)) {
@@ -306,7 +388,7 @@ export default function DeudasClientesPanel() {
 
     setPaymentForm((f) => ({
       ...f,
-      efectivo: String(saldoCliente),
+      efectivo: formatNumberInput(String(Math.round(saldoCliente))),
       transferencia: "",
       date: hoyISO(),
       description: "Cancelación total de la deuda",
@@ -319,13 +401,11 @@ export default function DeudasClientesPanel() {
     clearMessages();
     setEditingMovement(m);
 
-    const dateISO = m.date
-      ? new Date(m.date).toISOString().slice(0, 10)
-      : hoyISO();
+    const dateISO = m.date ? toInputDate(m.date) : hoyISO();
 
     if (m.type === "DEBIT") {
       setDebtForm({
-        amount: String(m.amount ?? ""),
+        amount: formatNumberInput(String(m.amount ?? "")),
         date: dateISO,
         description: m.description || "",
       });
@@ -333,11 +413,12 @@ export default function DeudasClientesPanel() {
       resetPaymentForm();
     } else {
       // CREDIT → rellenar formulario de pago
+      const baseAmount = String(m.amount ?? "");
+      const formatted = formatNumberInput(baseAmount);
+
       setPaymentForm({
-        efectivo:
-          m.method === "TRANSFERENCIA" ? "" : String(m.amount ?? ""),
-        transferencia:
-          m.method === "TRANSFERENCIA" ? String(m.amount ?? "") : "",
+        efectivo: m.method === "TRANSFERENCIA" ? "" : formatted,
+        transferencia: m.method === "TRANSFERENCIA" ? formatted : "",
         date: dateISO,
         description: m.description || "",
       });
@@ -485,13 +566,23 @@ export default function DeudasClientesPanel() {
                       <span>{selectedClient.phone}</span>
                     </div>
                   )}
-                  {selectedClient.address &&(
-                     <div>
+                  {selectedClient.address && (
+                    <div>
                       <span className="text-slate-500">Direccion: </span>
                       <span>{selectedClient.address}</span>
                     </div>
-                  ) }
+                  )}
                 </div>
+
+                {/* BOTÓN ELIMINAR CLIENTE */}
+                <button
+                  type="button"
+                  onClick={handleDeleteClient}
+                  disabled={loading}
+                  className="mt-3 inline-flex items-center px-3 py-1.5 rounded-lg border border-rose-500 text-[11px] font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-60"
+                >
+                  🗑️ Eliminar cliente
+                </button>
               </div>
             )}
           </div>
@@ -604,12 +695,12 @@ export default function DeudasClientesPanel() {
                   Monto
                 </label>
                 <input
-                  type="number"
+                  type="text"
                   name="amount"
                   value={debtForm.amount}
                   onChange={onChangeDebt}
                   className="border-2 border-slate-900/70 rounded-xl px-3 py-2 w-full text-right text-lg font-semibold tracking-wide bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  placeholder="0.00"
+                  placeholder="0"
                 />
               </div>
               <div>
@@ -695,12 +786,12 @@ export default function DeudasClientesPanel() {
                   Efectivo
                 </label>
                 <input
-                  type="number"
+                  type="text"
                   name="efectivo"
                   value={paymentForm.efectivo}
                   onChange={onChangePayment}
                   className="border rounded-xl px-3 py-2 w-full"
-                  placeholder="0.00"
+                  placeholder="0"
                 />
               </div>
               <div>
@@ -708,12 +799,12 @@ export default function DeudasClientesPanel() {
                   Transferencia
                 </label>
                 <input
-                  type="number"
+                  type="text"
                   name="transferencia"
                   value={paymentForm.transferencia}
                   onChange={onChangePayment}
                   className="border rounded-xl px-3 py-2 w-full"
-                  placeholder="0.00"
+                  placeholder="0"
                 />
               </div>
               <div>

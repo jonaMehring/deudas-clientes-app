@@ -12,7 +12,6 @@ client
 
 # Otros archivos que no hacen falta
 npm-debug.log
-Dockerfile
-*.log
+*.log 
 dist
 build

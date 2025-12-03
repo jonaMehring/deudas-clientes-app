@@ -1,24 +1,23 @@
-# 1. Imagen base
-FROM node:18-alpine
+FROM node:18-alpine 
 
-# 2. Carpeta de trabajo base
-WORKDIR /app
-
-# 3. Copiar package.json del server
-COPY server/package.json server/package-lock.json* ./server/
-
-# 4. Instalar dependencias del backend
+# Carpeta de trabajo dentro del contenedor
 WORKDIR /app/server
+
+# 1) Copiamos SOLO las dependencias del backend
+COPY server/package.json server/package-lock.json* ./
+
+# 2) Instalamos dependencias (dentro del contenedor, para Linux)
 RUN npm install
 
-# 5. Copiar TODO el código del backend
-COPY server/. .
+# 3) Copiamos solo lo necesario del backend (sin node_modules)
+COPY server/prisma ./prisma
+COPY server/src ./src
 
-# 6. Generar Prisma Client
+# 4) Generar Prisma Client
 RUN npx prisma generate
 
-# 7. Exponer puerto
+# 5) Exponer el puerto
 EXPOSE 4000
 
-# 8. Comando de inicio
+# 6) Comando de inicio
 CMD ["npm", "start"]

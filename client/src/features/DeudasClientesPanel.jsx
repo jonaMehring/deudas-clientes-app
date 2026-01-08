@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from "react"; 
-import api from "../api"; 
+import { useEffect, useMemo, useState } from "react";
+import api from "../api";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const fmt = (n) =>
   Number(n || 0).toLocaleString("es-AR", {
@@ -239,7 +241,7 @@ export default function DeudasClientesPanel() {
     } catch (e) {
       setErr(
         e?.response?.data?.error ||
-          "No se pudo crear el cliente. Verificá los datos."
+        "No se pudo crear el cliente. Verificá los datos."
       );
     } finally {
       setLoading(false);
@@ -268,7 +270,7 @@ export default function DeudasClientesPanel() {
     } catch (e) {
       setErr(
         e?.response?.data?.error ||
-          "No se pudo eliminar el cliente. Intentá de nuevo."
+        "No se pudo eliminar el cliente. Intentá de nuevo."
       );
     } finally {
       setLoading(false);
@@ -317,7 +319,7 @@ export default function DeudasClientesPanel() {
     } catch (e) {
       setErr(
         e?.response?.data?.error ||
-          "No se pudo registrar la deuda. Intentá de nuevo."
+        "No se pudo registrar la deuda. Intentá de nuevo."
       );
     } finally {
       setLoading(false);
@@ -375,7 +377,7 @@ export default function DeudasClientesPanel() {
     } catch (e) {
       setErr(
         e?.response?.data?.error ||
-          "No se pudo registrar el pago. Intentá de nuevo."
+        "No se pudo registrar el pago. Intentá de nuevo."
       );
     } finally {
       setLoading(false);
@@ -443,12 +445,122 @@ export default function DeudasClientesPanel() {
     } catch (e) {
       setErr(
         e?.response?.data?.error ||
-          "No se pudo eliminar el movimiento. Intentá de nuevo."
+        "No se pudo eliminar el movimiento. Intentá de nuevo."
       );
     } finally {
       setLoading(false);
     }
   }
+  function exportarPDF() {
+    if (!selectedClient || !movimientos.length) {
+      alert("No hay datos para exportar");
+      return;
+    }
+
+    const doc = new jsPDF();
+
+    doc.setFontSize(16);
+    doc.text("Estado de Cuenta - Cliente", 14, 18);
+
+    doc.setFontSize(11);
+    doc.text(`Cliente: ${selectedClient.name}`, 14, 28);
+    selectedClient.address &&
+      doc.text(`Dirección: ${selectedClient.address}`, 14, 34);
+    selectedClient.city &&
+      doc.text(`Localidad: ${selectedClient.city}`, 14, 40);
+    selectedClient.phone &&
+      doc.text(`Teléfono: ${selectedClient.phone}`, 14, 46);
+
+    doc.text(`Saldo actual: $ ${fmt(saldoCliente)}`, 14, 54);
+
+    autoTable(doc, {
+      startY: 62,
+      head: [["Fecha", "Tipo", "Método", "Detalle", "Monto"]],
+      body: movimientos.map((m) => [
+        new Date(m.date).toLocaleDateString("es-AR"),
+        m.type === "DEBIT" ? "Deuda" : "Pago",
+        m.method || "-",
+        m.description || "-",
+        `$ ${fmt(m.amount)}`,
+      ]),
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [15, 23, 42] },
+      columnStyles: { 4: { halign: "right" } },
+    });
+
+    doc.setFontSize(9);
+    doc.text(
+      `Generado el ${new Date().toLocaleDateString("es-AR")}`,
+      14,
+      doc.internal.pageSize.height - 10
+    );
+
+    doc.save(
+      `CuentaCorriente_${selectedClient.name.replace(/\s+/g, "_")}.pdf`
+    );
+  }
+  function exportarFacturaX(m) {
+  if (!selectedClient) return;
+
+  const doc = new jsPDF();
+  const numero = `FX-${String(m.id).padStart(6, "0")}`;
+
+  doc.setFontSize(16);
+  doc.text("FACTURA X", 14, 18);
+
+  doc.setFontSize(10);
+  doc.text("Documento no válido como factura fiscal", 14, 25);
+
+  doc.setFontSize(11);
+  doc.text(`N°: ${numero}`, 150, 18);
+  doc.text(
+    `Fecha: ${new Date(m.date).toLocaleDateString("es-AR")}`,
+    150,
+    25
+  );
+
+  doc.line(14, 30, 196, 30);
+
+  doc.text("Datos del cliente", 14, 38);
+  doc.text(`Nombre: ${selectedClient.name}`, 14, 44);
+  selectedClient.address &&
+    doc.text(`Dirección: ${selectedClient.address}`, 14, 50);
+  selectedClient.phone &&
+    doc.text(`Teléfono: ${selectedClient.phone}`, 14, 56);
+
+  doc.line(14, 62, 196, 62);
+
+  doc.text("Detalle del trabajo", 14, 70);
+
+  autoTable(doc, {
+    startY: 74,
+    head: [["Cantidad", "Descripción", "Importe"]],
+    body: [
+      [
+        "1",
+        m.description || "Trabajo / Servicio",
+        `$ ${fmt(m.amount)}`,
+      ],
+    ],
+    styles: { fontSize: 10 },
+    headStyles: { fillColor: [30, 41, 59] },
+    columnStyles: { 2: { halign: "right" } },
+  });
+
+  const yFinal = doc.lastAutoTable.finalY + 10;
+
+  doc.setFontSize(12);
+  doc.text(`TOTAL: $ ${fmt(m.amount)}`, 150, yFinal);
+
+  doc.setFontSize(9);
+  doc.text(
+    "Este comprobante respalda el trabajo realizado y la deuda registrada.",
+    14,
+    285
+  );
+
+  doc.save(`FacturaX_${selectedClient.name}_${numero}.pdf`);
+}
 
   // ---------------- RENDER ----------------
   return (
@@ -540,6 +652,7 @@ export default function DeudasClientesPanel() {
                     Saldo actual
                   </span>
 
+
                   <span
                     className={
                       "px-3 py-1 rounded-full text-lg font-bold " +
@@ -550,8 +663,15 @@ export default function DeudasClientesPanel() {
                   >
                     $ {fmt(saldoCliente)}
                   </span>
-                </div>
 
+                </div>
+                <button
+                  onClick={exportarPDF}
+                  disabled={!movimientos.length}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs disabled:opacity-50"
+                >
+                  📄 Exportar PDF
+                </button>
                 {/* INFO EXTRA DEL CLIENTE */}
                 <div className="text-xs text-slate-700 space-y-1">
                   {selectedClient.city && (
@@ -740,8 +860,8 @@ export default function DeudasClientesPanel() {
                 {loading
                   ? "Guardando..."
                   : editingMovement && editingMovement.type === "DEBIT"
-                  ? "Guardar cambios"
-                  : "Agregar deuda"}
+                    ? "Guardar cambios"
+                    : "Agregar deuda"}
               </button>
               <button
                 type="button"
@@ -750,6 +870,7 @@ export default function DeudasClientesPanel() {
               >
                 Limpiar
               </button>
+
             </div>
           </div>
 
@@ -852,8 +973,8 @@ export default function DeudasClientesPanel() {
                 {loading
                   ? "Guardando..."
                   : editingMovement && editingMovement.type === "CREDIT"
-                  ? "Guardar cambios"
-                  : "Registrar pago"}
+                    ? "Guardar cambios"
+                    : "Registrar pago"}
               </button>
               <button
                 type="button"
@@ -951,6 +1072,15 @@ export default function DeudasClientesPanel() {
                             >
                               🗑️ Eliminar
                             </button>
+                            {m.type === "DEBIT" && (
+                              <button
+                                type="button"
+                                onClick={() => exportarFacturaX(m)}
+                                className="inline-flex items-center px-2 py-1 rounded-lg border border-slate-700 text-[11px] text-slate-700 hover:bg-slate-100"
+                              >
+                                🧾 Factura X
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
